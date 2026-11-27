@@ -25,13 +25,20 @@ const userSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        default: 'Active',
-        enum: ['Active', 'Suspended', 'Deleted']
+        default: 'Inactive',
+        enum: ['Active', 'Suspended', 'Deleted', 'Inactive']
     },
     posts: [{
         type: mongoose.SchemaTypes.ObjectId,
         ref: 'Posts'
-    }]
+    }],
+    isVerified: {
+        type: Boolean,
+        default: false
+    },
+    otp:{
+        type: String
+    }
 }, {
     timestamps: true
 })
