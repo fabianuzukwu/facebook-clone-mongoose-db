@@ -24,6 +24,11 @@ exports.authenticate = async (req, res, next) => {
         req.user = decodedToken
         next()
     } catch (error) {
+       if (error instanceof  jwt.JsonWebTokenError || error instanceof jwt.TokenExpiredError) {
+         return res.status(401).json({
+            message: 'Session expired: Please login to continue'
+         })
+       }
        res.status(500).json({
         message: error.message
        })
