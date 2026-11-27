@@ -2,7 +2,8 @@ const userModel = require('../models/user')
 const bcrypt = require('bcrypt')
 const sendEmail = require('../utils/email')
 const otpGenerator = require('otp-generator')
-const jwt = require('jsonwebtoken')
+const jwt = require('jsonwebtoken');
+const { signUpTemplate, resendOtpTemplate } = require( '../utils/emailTemplates' );
 
 exports.signUp = async (req, res) => {
     try{
@@ -19,12 +20,15 @@ exports.signUp = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, saltedRounds)
 
         const otp = otpGenerator.generate(6, {lowerCaseAlphabets: false, upperCaseAlphabets:false, specialChars: false})
+
+        const otpExpiresAt = new Date(Date.now() + 2 * 60 * 1000)
         const data = {
             fullName,
             email: email.toLowerCase(),
             gender,
             password: hashedPassword,
             age,
+            otpExpiresAt,
             otp
         }
 
@@ -34,7 +38,7 @@ exports.signUp = async (req, res) => {
             name: newUser.fullName,
             email: newUser.email,
             subject: 'Welcome to Zanzibar',
-            htmlContent: `<html><head></head><body><p>Hello ${newUser.fullName},</p>We are thrilled to have you onboard, Please use the OTP below to verify your account. <br> ${otp} </p></body></html>`
+            htmlContent: signUpTemplate(newUser.fullName, otp, otpExpiresAt.toLocaleString())
         }
         await sendEmail(emailContent)
 
@@ -177,10 +181,16 @@ exports.verifyEmail = async (req, res) => {
                 message: 'User not found'
             })
         }
-
-        if (user.otp !== otp ) {
+        
+        if (user.isVerified) {
             return res.status(400).json({
-                message: 'Invalid OTP'
+                message: 'User already verified, please process to login'
+            })
+        }
+
+        if (user.otp !== otp  || user.otpExpiresAt < new Date()) {
+            return res.status(400).json({
+                message: 'Invalid OTP or Expired'
             }) 
         }
 
@@ -277,3 +287,73 @@ exports.resetPassword = async (req, res) => {
     }
 }
 
+exports.resendOtp = async (req, res) => {
+    try {
+        const {email} = req.body
+        const user = await userModel.findOne({email: email.toLowerCase()})
+
+         if (!user) {
+            return res.status(404).json({
+                message: 'User not found'
+            })
+        }
+
+        const otp = otpGenerator.generate(6, {upperCaseAlphabets: false, lowerCaseAlphabets: false, specialChars: false})
+
+        const otpExpiresAt = new Date(Date.now() + 2 * 60 * 1000)
+        const emailContent = {
+            subject: 'OTP Reset',
+            email,
+            name: user.fullName,
+            htmlContent: resendOtpTemplate(user.fullName, otp, otpExpiresAt.toLocaleString() )
+        }
+
+        user.otp = otp
+        user.otpExpiresAt = otpExpiresAt
+        await sendEmail(emailContent)
+        await user.save()
+
+        res.status(200).json({
+            message: "New OTP sent, please check your email."
+        })
+    } catch (error) {
+         res.status(500).json({
+            message: error.message 
+        }) 
+    }
+}
+
+exports.changePassword = async (req, res) => {
+    try {
+        const {id, email } = req.user;
+        const {oldPassword, newPassword, confirmPassword} = req.body
+        const user = await userModel.findById(id)
+
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({
+                message: 'Password does not match'
+            })
+        }
+
+        const verifyPassword  = await bcrypt.compare(oldPassword, user.password)
+        if (verifyPassword == false) {
+            return res.status(400).json({
+                message: 'Incorrect Password'
+            })
+        }
+
+        const saltedRounds = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, saltedRounds);
+
+        user.password = hashedPassword
+        await user.save()
+
+        res.status(200).json({
+            message: 'Password changed successfully'
+        })
+    } catch (error) {
+        res.status(500).json({
+            message: error.message
+        })
+    }
+}
